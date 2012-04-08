@@ -13,31 +13,80 @@ class LessDB
         $this->close();
     }
 
-    public function insertInto($table) {
-        return new LessDBInsertTable($this->dsn, $table);
-    }
-
-	public function queryFrom($table) {
-		return new LessDBQueryTable($this->dsn, $table);
+	public function getTable($table) {
+		return new LessDBTable($this->dsn, $table);
+	}
+	
+	public function complexQuery($sql) {
+		$this->connect();
+		
+		$stmt = $this->pdo->prepare($sql);
+		$stmt->execute();
+		$result = $stmt->fetchAll();
+		
+		$this->close();
+		
+		return $result;
 	}
 
-    public function connect() {
+    private function connect() {
         $this->pdo = new PDO($this->dsn);
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     }
 
-    public function close() {
+    private function close() {
         $this->pdo = null;
     }
 }
 
-class LessDBQueryTable extends LessDB
+class LessDBTable extends LessDB 
 {
 	private $table;
 	
 	function __construct($dsn, $table) {
 		parent::__construct($dsn);
 		$this->table = $table;
+	}
+	
+	function __destruct() {
+		parent::__destruct();
+	}
+	
+	/*
+	 * Query methods
+	 */
+	public function getJson($columns, $condition = null) {
+		return json_encode($this->query($columns, $condition));
+	}
+	
+	public function getArray($columns, $conditions = null) {
+		return $this->query($columns, $conditions);
+	}
+	
+	/*
+	 * Insert methods
+	 */
+	public function addPair($name, $value) {
+        $this->pairs[':'.$name] = $value;
+    }
+
+    public function execute() {
+        $this->connect();
+        
+        $stmt = $this->pdo->prepare($this->makeSql());
+        $result = $stmt->execute($this->pairs);
+        $stmt->closeCursor();
+        
+        $this->close();
+
+        return $result;
+    }
+
+	/*
+	 * Private methods
+	 */ 
+	private function clearPairs() {
+		$this->pairs = array();
 	}
 	
 	private function query($columns, $condition) {
@@ -66,58 +115,10 @@ class LessDBQueryTable extends LessDB
 		return $result;
 	}
 	
-	public function getJson($columns, $condition = null) {
-		return json_encode($this->query($columns, $condition));
-	}
-	
-	public function getArray($columns, $conditions = null) {
-		return $this->query($columns, $conditions);
-	}
-}
-
-class LessDBInsertTable extends LessDB
-{
-    private $table;
-    private $pairs;
-    
-    function __construct($dsn, $table) {
-        parent::__construct($dsn);
-        $this->table = $table;
-        $pairs = array();
-    }
-
-    function __destruct() {
-        parent::__destruct();
-    }
-
-    public function addPair($name, $value) {
-        $this->pairs[':'.$name] = $value;
-    }
-
-    public function execute() {
-        $this->connect();
-        
-        $stmt = $this->pdo->prepare($this->getSql());
-        $result = $stmt->execute($this->pairs);
-        $stmt->closeCursor();
-        
-        $this->close();
-
-        return $result;
-    }
-
-    public function getSql() {
+	private function makeSql() {
         $columns = implode("", explode(":", implode(", ", array_keys($this->pairs))));
         $bindings = implode(", ", array_keys($this->pairs));
         
         return sprintf("INSERT INTO %s (%s) VALUES (%s)", $this->table, $columns, $bindings);
     }
-
-	private function clearPairs() {
-		$this->pairs = array();
-	}
 }
-
-$db = new LessDB("sqlite:serve.db");
-$usersTable = $db->queryFrom("Users");
-echo $usersTable->getJson("fname, lname");
